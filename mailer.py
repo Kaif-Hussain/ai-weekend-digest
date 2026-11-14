@@ -1,14 +1,15 @@
 import os
 import smtplib
 import ssl
+import requests
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 
 load_dotenv()
 
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "").strip()
 SENDER_EMAIL = os.environ.get("SENDER_EMAIL", "").strip()
-# Strip spaces or underscores in case the 16-char App Password was pasted with separators
 RAW_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 GMAIL_APP_PASSWORD = RAW_PASSWORD.replace(" ", "").replace("_", "").strip()
 
@@ -68,38 +69,47 @@ def build_email_html(day_label: str, rank_badge: str, item: dict) -> str:
 
 
 def send_weekend_email(to_email: str, day_label: str, rank_badge: str, item: dict):
-    if not SENDER_EMAIL or not GMAIL_APP_PASSWORD:
-        raise RuntimeError("SENDER_EMAIL or GMAIL_APP_PASSWORD missing in .env")
+    subject = f"[{day_label} AI Pick] {item.get('title', 'Top AI News of the Week')}"
+    html_content = build_email_html(day_label, rank_badge, item)
 
-    if len(GMAIL_APP_PASSWORD) != 16:
-        raise RuntimeError(
-            f"GMAIL_APP_PASSWORD must be 16 characters (found {len(GMAIL_APP_PASSWORD)}). "
-            "Make sure you generated a Google App Password, not your normal Gmail password."
+    if not SENDER_EMAIL:
+        raise RuntimeError("SENDER_EMAIL is missing in environment variables.")
+
+    # Primary: Brevo HTTPS API (Port 443 — bypasses Railway SMTP blocks & sends to any friend)
+    if BREVO_API_KEY:
+        response = requests.post(
+            "https://api.brevo.com/v3/smtp/email",
+            headers={
+                "accept": "application/json",
+                "api-key": BREVO_API_KEY,
+                "content-type": "application/json",
+            },
+            json={
+                "sender": {"name": "AI Weekend Digest", "email": SENDER_EMAIL},
+                "to": [{"email": to_email}],
+                "subject": subject,
+                "htmlContent": html_content,
+            },
+            timeout=20,
         )
+        if response.status_code >= 400:
+            raise RuntimeError(f"Brevo API Error ({response.status_code}): {response.text}")
+        return
+
+    # Fallback: Local Gmail SMTP (for local testing when BREVO_API_KEY is not set)
+    if not GMAIL_APP_PASSWORD:
+        raise RuntimeError("Set BREVO_API_KEY (for Railway) or GMAIL_APP_PASSWORD (for local SMTP).")
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"[{day_label} AI Pick] {item.get('title', 'Top AI News of the Week')}"
+    msg["Subject"] = subject
     msg["From"] = f"AI Weekend Digest <{SENDER_EMAIL}>"
     msg["To"] = to_email
-
-    html_content = build_email_html(day_label, rank_badge, item)
     msg.attach(MIMEText(html_content, "html"))
 
     context = ssl.create_default_context()
-
-    # Primary: Port 587 with STARTTLS (avoids ISP/firewall blocks on port 465)
-    try:
-        with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-            server.login(SENDER_EMAIL, GMAIL_APP_PASSWORD)
-            server.sendmail(SENDER_EMAIL, to_email, msg.as_string())
-            return
-    except smtplib.SMTPAuthenticationError as auth_err:
-        raise RuntimeError(f"Gmail rejected SENDER_EMAIL or App Password: {auth_err}")
-    except Exception:
-        # Fallback: Port 465 SSL
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=20) as server:
-            server.login(SENDER_EMAIL, GMAIL_APP_PASSWORD)
-            server.sendmail(SENDER_EMAIL, to_email, msg.as_string())
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=20) as server:
+        server.ehlo()
+        server.starttls(context=context)
+        server.ehlo()
+        server.login(SENDER_EMAIL, GMAIL_APP_PASSWORD)
+        server.sendmail(SENDER_EMAIL, to_email, msg.as_string())

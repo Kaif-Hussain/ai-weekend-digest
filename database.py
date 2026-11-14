@@ -6,8 +6,7 @@ from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 load_dotenv()
-
-DB_PATH = "subscribers.db"
+DB_PATH = os.environ.get("DB_PATH", "subscribers.db")
 ENCRYPTION_KEY = os.environ.get("DB_ENCRYPTION_KEY")
 if not ENCRYPTION_KEY:
     raise RuntimeError("DB_ENCRYPTION_KEY is missing in .env file!")
