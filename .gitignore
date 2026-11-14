@@ -1,0 +1,27 @@
+# 1. Secrets & Environment Variables (CRITICAL — never push to GitHub)
+.env
+.env.*
+
+# 2. Local SQLite Database (Contains your & your friends' emails and encrypted API keys)
+subscribers.db
+*.db
+*.sqlite
+*.sqlite3
+
+# 3. Python Virtual Environment
+.venv/
+venv/
+env/
+
+# 4. Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+
+# 5. IDE / Editor Settings & OS Junk
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
