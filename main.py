@@ -1,14 +1,20 @@
+import os
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 from google.genai import Client
+from dotenv import load_dotenv
 
 from database import init_db, upsert_subscriber, delete_subscriber, save_sunday_cache
 from agent import run_digest_for_user
 from mailer import send_weekend_email
 from scheduler import start_scheduler, run_saturday_dispatch, run_sunday_dispatch
+
+load_dotenv()
+
+CRON_SECRET = os.environ.get("CRON_SECRET", "").strip()
 
 
 @asynccontextmanager
@@ -94,3 +100,21 @@ async def unsubscribe(payload: UnsubscribeRequest):
     if not removed:
         raise HTTPException(status_code=404, detail="Email not found in subscriber list.")
     return {"status": "deleted", "message": "Your email and encrypted API key have been permanently wiped."}
+
+
+@app.post("/api/cron/saturday")
+async def trigger_saturday_cron(x_cron_secret: str = Header(default="")):
+    """External cron webhook: wakes container every Saturday 09:00 IST to dispatch Pick #1 & cache Pick #2."""
+    if not CRON_SECRET or x_cron_secret != CRON_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized cron trigger")
+    await run_saturday_dispatch()
+    return {"status": "ok", "job": "saturday_dispatch_completed"}
+
+
+@app.post("/api/cron/sunday")
+async def trigger_sunday_cron(x_cron_secret: str = Header(default="")):
+    """External cron webhook: wakes container every Sunday 09:00 IST to dispatch cached Pick #2."""
+    if not CRON_SECRET or x_cron_secret != CRON_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized cron trigger")
+    await run_sunday_dispatch()
+    return {"status": "ok", "job": "sunday_dispatch_completed"}
